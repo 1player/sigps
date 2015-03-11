@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+import sys, platform
+from collections import OrderedDict
+
+
+CAUGHT_COLOR = '\033[32m'
+IGNORED_COLOR = '\033[33m'
+BLOCKED_COLOR = '\033[31m'
+ENDC = '\033[0m'
+
+SIGNALS = {
+    'x86': [
+        None,        'SIGHUP',        'SIGINT',    'SIGQUIT',  # 0-3
+        'SIGILL',    'SIGTRAP',       'SIGABRT',   'SIGBUS',   # 4-7
+        'SIGFPE',    'SIGKILL',       'SIGUSR1',   'SIGSEGV',  # 8-11
+        'SIGUSR2',   'SIGPIPE',       'SIGALRM',   'SIGTERM',  # 12-15
+        'SIGSTKFLT', 'SIGCHLD',       'SIGCONT',   'SIGSTOP',  # 16-19
+        'SIGTSTP',   'SIGTTIN',       'SIGTTOU',   'SIGURG',   # 20-23
+        'SIGXCPU',   'SIGXFSZ',       'SIGVTALRM', 'SIGPROF',  # 24-27
+        'SIGWINCH',  'SIGIO/SIGPOLL', 'SIGPWR',    'SIGSYS'    # 28-31
+    ],
+}
+
+
+def get_signal_table():
+    arch = platform.machine()
+    if arch == 'i386' or arch == 'x86_64':
+        arch = 'x86'
+
+    return SIGNALS.get(arch, None)
+
+def signal_mask_for_pid(pid):
+    signals = {}
+
+    with open('/proc/%d/status' % pid, 'r') as pf:
+        for line in pf:
+            header, data = line.rstrip('\n').split(':\t', 1)
+            if header == 'SigIgn':
+                signals['ignored'] = int(data, 16)
+            elif header == 'SigCgt':
+                signals['caught'] = int(data, 16)
+            elif header == 'SigBlk':
+                signals['blocked'] = int(data, 16)
+
+    return signals
+
+def signal_status(mask, table):
+    signals = OrderedDict()
+    for i in range(1, len(table)):
+        signame = table[i]
+        if signame is None:
+            signame = 'unknown(%d)' % i
+        sigbit = 1 << (i - 1)
+        if mask['caught'] & sigbit:
+            signals[signame] = CAUGHT_COLOR + 'caught' + ENDC
+        elif mask['ignored'] & sigbit:
+            signals[signame] = IGNORED_COLOR + 'ignored' + ENDC
+        elif mask['blocked'] & sigbit:
+            signals[signame] = BLOCKED_COLOR + 'blocked' + ENDC
+
+    return signals
+
+def usage():
+    print ("""Show process signal table
+Usage: %s <pid>
+
+https://github.com/1player/sigps""" % sys.argv[0], file=sys.stderr)
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        usage()
+        sys.exit(1)
+
+    try:
+        pid = int(sys.argv[1])
+    except ValueError:
+        usage()
+        sys.exit(1)
+
+    signal_table = get_signal_table()
+    if signal_table is None:
+        print ('Architecture not supported.', file=sys.stderr)
+        sys.exit(1)
+
+    signal_mask = signal_mask_for_pid(pid)
+    signals = signal_status(signal_mask, signal_table)
+    print('Signal table for PID %d:' % pid)
+    for signame, status in signals.items():
+        print('%15s: %s' % (signame, status))
+
